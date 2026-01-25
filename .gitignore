@@ -1,0 +1,12 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+
+# dbt
+target/
+dbt_packages/
+
+# OS
+.DS_Store
