@@ -2,11 +2,51 @@
 .terraform/
 *.tfstate
 *.tfstate.*
+*.tfstate.backup
 terraform.tfvars
+.terraform.lock.hcl
+tfplan
 
 # dbt
 target/
 dbt_packages/
+logs/
+profiles.yml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv
+
+# Data
+data/
+*.csv
+*.parquet
+*.json
+
+# AWS
+.aws/
+*.pem
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # OS
 .DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Secrets
+*.secret
+.env
+.env.local

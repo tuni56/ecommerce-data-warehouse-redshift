@@ -1,0 +1,9 @@
+# AWS Configuration
+aws_region  = "us-east-2"
+environment = "dev"
+
+# Redshift Configuration
+database_name  = "dev"
+admin_username = "admin"
+# admin_password = "YourSecurePassword123!"  # Set via environment variable or prompt
+base_capacity  = 8  # RPU units (8 = minimum for dev)
