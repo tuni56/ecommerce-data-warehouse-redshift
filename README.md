@@ -24,8 +24,18 @@ A production-grade data warehouse implementation for ecommerce analytics, built 
 
 The solution implements a modern lakehouse pattern with three distinct layers:
 
-```
-Source Systems → S3 (Raw/Bronze) → Glue ETL → S3 (Staging/Silver) → Redshift (Gold) → BI Tools
+```mermaid
+graph LR
+    A[Source Systems<br/>OLTP Databases] -->|CDC/Batch Export| B[S3 Raw Zone<br/>Bronze Layer]
+    B -->|AWS Glue ETL| C[S3 Staging Zone<br/>Silver Layer]
+    C -->|COPY/Incremental Load| D[Redshift Serverless<br/>Gold Layer]
+    D -->|SQL Queries| E[BI Tools<br/>QuickSight/Tableau]
+    D -->|Ad-hoc Analysis| F[Data Analysts]
+    
+    style B fill:#ff9900,stroke:#232f3e,stroke-width:2px,color:#fff
+    style C fill:#ff9900,stroke:#232f3e,stroke-width:2px,color:#fff
+    style D fill:#8c4fff,stroke:#232f3e,stroke-width:2px,color:#fff
+    style E fill:#232f3e,stroke:#ff9900,stroke-width:2px,color:#fff
 ```
 
 **Key Components:**
@@ -35,7 +45,7 @@ Source Systems → S3 (Raw/Bronze) → Glue ETL → S3 (Staging/Silver) → Reds
 - **dbt**: SQL-based transformations with built-in testing and documentation
 - **Terraform**: Infrastructure provisioning with modular, reusable components
 
-[Detailed architecture documentation →](docs/architecture.md)
+[Detailed architecture diagrams →](docs/architecture-diagram.md) | [Architecture documentation →](docs/architecture.md)
 
 ## Data Model
 
