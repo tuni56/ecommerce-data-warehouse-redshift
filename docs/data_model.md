@@ -42,7 +42,7 @@ erDiagram
         string segment
         date valid_from
         date valid_to
-        boolean is_current
+        bool is_current
     }
 
     dim_products {
@@ -54,7 +54,7 @@ erDiagram
         decimal list_price
         date valid_from
         date valid_to
-        boolean is_current
+        bool is_current
     }
 
     dim_date {
@@ -65,7 +65,7 @@ erDiagram
         int month
         int day_of_week
         string month_name
-        boolean is_weekend
+        bool is_weekend
     }
 
     dim_payment_methods {
