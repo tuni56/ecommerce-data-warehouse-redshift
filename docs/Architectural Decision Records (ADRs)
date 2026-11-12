@@ -1,0 +1,207 @@
+Overview
+
+This document records the architectural decisions adopted for the Ecommerce Data Warehouse on AWS.
+
+Each decision describes its context, the selected approach, and its technical consequences.
+
+The purpose is to maintain architectural consistency throughout the implementation and provide a clear rationale for the technologies and design patterns used in the project.
+
+ADR-001 — Amazon Redshift Serverless as the Data Warehouse
+
+Status: Accepted
+
+Context
+
+The project requires a centralized analytical warehouse capable of supporting ecommerce reporting and analytical queries.
+
+The infrastructure should minimize the operational overhead associated with managing and maintaining provisioned warehouse clusters.
+
+Decision
+
+Use Amazon Redshift Serverless as the analytical data warehouse.
+
+Consequences
+
+AWS manages the underlying warehouse compute infrastructure.
+
+Capacity configuration must reflect workload requirements.
+
+Storage and compute usage must be monitored to manage costs.
+
+The warehouse remains responsible for analytical storage and SQL query execution.
+
+ADR-002 — Star Schema for Dimensional Modeling
+
+Status: Accepted
+
+Context
+
+The platform must support analytical queries across ecommerce orders, customers, products, payment methods, and shipment status.
+
+A dimensional model provides a structure that is easier to understand and query for reporting and business intelligence.
+
+Decision
+
+Adopt a star schema with fact_order_items as the central fact table and five associated dimensions:
+
+dim_customers
+
+dim_products
+
+dim_date
+
+dim_payment_methods
+
+dim_shipment_status
+
+The fact table grain is one row per order item.
+
+Consequences
+
+Analytical measures are stored in the fact table.
+
+Descriptive attributes are maintained in dimension tables.
+
+Surrogate keys establish warehouse relationships.
+
+The model supports consistent analytical queries across business dimensions.
+
+ADR-003 — SCD Type 2 for Customer and Product Dimensions
+
+Status: Accepted
+
+Context
+
+Customer and product attributes can change over time.
+
+Overwriting existing dimension records would remove historical information and limit the ability to analyze business events using the attributes that were valid when those events occurred.
+
+Decision
+
+Implement Slowly Changing Dimension Type 2 for dim_customers and dim_products.
+
+Consequences
+
+Dimension records use surrogate keys.
+
+Historical versions are preserved instead of overwritten.
+
+valid_from and valid_to define each version's validity period.
+
+is_current identifies the active version.
+
+Fact records must reference the appropriate historical dimension version.
+
+ADR-004 — AWS Glue for Data Cataloging and Integration
+
+Status: Accepted
+
+Context
+
+Ecommerce source datasets are stored in Amazon S3 and require metadata management and data integration capabilities before being consumed by the analytical warehouse.
+
+Decision
+
+Use AWS Glue for data cataloging and integration workflows.
+
+Consequences
+
+Glue Data Catalog maintains metadata about source datasets.
+
+Glue supports dataset discovery and schema management.
+
+Glue integration workflows prepare data for downstream processing.
+
+The integration layer remains separate from analytical transformations managed by dbt Core.
+
+ADR-005 — Amazon S3 as the Data Lake Storage Layer
+
+Status: Accepted
+
+Context
+
+The architecture requires a storage layer that separates original source datasets from intermediate data prepared for warehouse loading.
+
+Preserving source data also provides a basis for reprocessing and auditing.
+
+Decision
+
+Use Amazon S3 as the data lake storage layer, with two logical zones:
+
+Raw: original source datasets.
+
+Staging: intermediate datasets prepared for warehouse loading.
+
+Consequences
+
+Source data and prepared data remain logically separated.
+
+Data preparation does not overwrite the original source datasets.
+
+S3 provides the storage foundation for AWS Glue integration workflows.
+
+Retention, lifecycle, encryption, and access policies must be defined as part of infrastructure configuration.
+
+ADR-006 — dbt Core for SQL Transformations
+
+Status: Accepted
+
+Context
+
+The warehouse requires a structured transformation layer with version-controlled SQL logic, reusable models, data quality tests, and generated documentation.
+
+Decision
+
+Use dbt Core to manage transformations within Amazon Redshift.
+
+Consequences
+
+SQL transformations are maintained as project source code.
+
+Models are organized into staging, intermediate, and marts layers.
+
+Data quality rules are implemented through dbt tests.
+
+dbt documentation provides model descriptions and lineage information.
+
+Transformation logic remains separate from AWS infrastructure provisioning.
+
+ADR-007 — AWS Step Functions for Workflow Orchestration
+
+Status: Accepted
+
+Context
+
+The data workflow contains dependent processing stages, including data integration, warehouse loading, and analytical transformations.
+
+These stages require coordination to establish execution order and manage workflow failures.
+
+Decision
+
+Use AWS Step Functions as the workflow orchestration service.
+
+Consequences
+
+Workflow execution is defined through state machines.
+
+Processing stages can be coordinated according to their dependencies.
+
+Retry and failure-handling behavior can be defined at the workflow level.
+
+The orchestration layer remains separate from the transformation logic implemented in dbt Core.
+
+Decision Governance
+
+These decisions establish the architectural baseline for the project.
+
+Any future architectural change should document:
+
+The technical or business requirement motivating the change.
+
+The alternatives considered.
+
+The selected approach and its rationale.
+
+The expected impact on infrastructure, data processing, operations, and cost.
+
+The README, architecture documentation, data model, Terraform configuration, and dbt project should remain consistent with the accepted decisions.
