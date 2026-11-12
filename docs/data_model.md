@@ -1,213 +1,210 @@
-# Data Model – Ecommerce Star Schema
 
-## Overview
+# Data Model — Ecommerce Data Warehouse
 
-The warehouse follows a **star schema** design optimized for analytical queries and BI tool consumption. All data flows from the Bronze and Silver layers into a set of conformed dimensions and a central fact table residing in Amazon Redshift Serverless (Gold layer).
+## 1. Overview
 
-The model is built and maintained using **dbt Core**, which handles SQL-based transformations, automated testing, and documentation generation.
+The ecommerce data warehouse follows a dimensional modeling approach based on a star schema.
 
----
+The model is designed to support analytical queries across orders, customers, products, payment methods, and shipment status.
 
-## Schema Diagram
+It consists of one central fact table and five dimension tables:
 
-```mermaid
-erDiagram
-    fact_order_items ||--o{ dim_customers : "customer_key"
-    fact_order_items ||--o{ dim_products : "product_key"
-    fact_order_items ||--o{ dim_date : "order_date_key"
-    fact_order_items ||--o{ dim_payment_methods : "payment_method_key"
-    fact_order_items ||--o{ dim_shipment_status : "shipment_status_key"
+- `fact_order_items`
+- `dim_customers`
+- `dim_products`
+- `dim_date`
+- `dim_payment_methods`
+- `dim_shipment_status`
 
-    fact_order_items {
-        bigint order_item_key PK
-        bigint order_key
-        bigint customer_key FK
-        bigint product_key FK
-        int order_date_key FK
-        int payment_method_key FK
-        int shipment_status_key FK
-        int quantity
-        decimal unit_price
-        decimal discount_amount
-        decimal total_amount
-        timestamp created_at
-    }
+Customer and product dimensions use Slowly Changing Dimension Type 2 (SCD Type 2) to preserve historical changes.
 
-    dim_customers {
-        bigint customer_key PK
-        string customer_id NK
-        string customer_name
-        string email
-        string country
-        string segment
-        date valid_from
-        date valid_to
-        bool is_current
-    }
-
-    dim_products {
-        bigint product_key PK
-        string product_id NK
-        string product_name
-        string category
-        string subcategory
-        decimal list_price
-        date valid_from
-        date valid_to
-        bool is_current
-    }
-
-    dim_date {
-        int date_key PK
-        date date_value
-        int year
-        int quarter
-        int month
-        int day_of_week
-        string month_name
-        bool is_weekend
-    }
-
-    dim_payment_methods {
-        int payment_method_key PK
-        string payment_method_name
-        string payment_type
-    }
-
-    dim_shipment_status {
-        int shipment_status_key PK
-        string status_name
-        string status_category
-    }
-```
-
----
-
-## Fact Table
+## 2. Fact Table
 
 ### `fact_order_items`
 
-**Grain:** One row per order item (an individual product line within an order).
+**Grain:** One row per order item.
 
-This grain was chosen to support product-level analysis without pre-aggregation, preventing double-counting when joining to multiple dimensions.
+Each record represents an individual product included in an ecommerce order.
 
-| Column | Type | Description |
+| Column | Data Type | Description |
 |---|---|---|
 | `order_item_key` | BIGINT | Surrogate primary key |
-| `order_key` | BIGINT | Reference to the parent order |
-| `customer_key` | BIGINT | FK → `dim_customers` |
-| `product_key` | BIGINT | FK → `dim_products` |
-| `order_date_key` | INT | FK → `dim_date` |
-| `payment_method_key` | INT | FK → `dim_payment_methods` |
-| `shipment_status_key` | INT | FK → `dim_shipment_status` |
-| `quantity` | INT | Units ordered |
-| `unit_price` | DECIMAL | Price per unit at time of sale |
-| `discount_amount` | DECIMAL | Discount applied to the line item |
-| `total_amount` | DECIMAL | `(unit_price × quantity) - discount_amount` |
+| `order_key` | VARCHAR | Source order identifier |
+| `customer_key` | BIGINT | Foreign key to `dim_customers` |
+| `product_key` | BIGINT | Foreign key to `dim_products` |
+| `order_date_key` | INTEGER | Foreign key to `dim_date` |
+| `payment_method_key` | INTEGER | Foreign key to `dim_payment_methods` |
+| `shipment_status_key` | INTEGER | Foreign key to `dim_shipment_status` |
+| `quantity` | INTEGER | Number of units ordered |
+| `unit_price` | DECIMAL | Price per unit |
+| `discount_amount` | DECIMAL | Discount applied to the order item |
+| `total_amount` | DECIMAL | Total order-item amount after discount |
 | `created_at` | TIMESTAMP | Record creation timestamp |
 
-**Distribution key:** `customer_key` — co-locates joins with `dim_customers`, the most frequent join target.  
-**Sort key:** `order_date_key` — optimizes time-series queries and range scans on order dates.
+### Business calculation
 
----
+The order-item total is calculated as:
 
-## Dimension Tables
+```sql
+total_amount = (quantity * unit_price) - discount_amount
+```
 
-### `dim_customers` — SCD Type 2
+The treatment of taxes, shipping charges, refunds, and currency conversion must be defined according to the source data and business requirements.
 
-Tracks the full history of customer attribute changes (e.g., segment reassignments, country updates). Each change produces a new row; the current record is identified by `is_current = TRUE`.
+## 3. Dimension Tables
 
-| Column | Type | Description |
+### 3.1 `dim_customers`
+
+Contains customer descriptive attributes and historical versions.
+
+| Column | Data Type | Description |
 |---|---|---|
 | `customer_key` | BIGINT | Surrogate primary key |
-| `customer_id` | VARCHAR | Natural key from source system |
-| `customer_name` | VARCHAR | Full name |
-| `email` | VARCHAR | Contact email |
-| `country` | VARCHAR | Country of residence |
-| `segment` | VARCHAR | Business segment (e.g., Retail, B2B) |
-| `valid_from` | DATE | Start of this record's validity |
-| `valid_to` | DATE | End of this record's validity (`NULL` if current) |
-| `is_current` | BOOLEAN | `TRUE` for the active record |
+| `customer_id` | VARCHAR | Natural/source customer identifier |
+| `customer_name` | VARCHAR | Customer name |
+| `email` | VARCHAR | Customer email |
+| `country` | VARCHAR | Customer country |
+| `segment` | VARCHAR | Customer segment |
+| `valid_from` | TIMESTAMP | Start of the record's validity |
+| `valid_to` | TIMESTAMP | End of the record's validity |
+| `is_current` | BOOLEAN | Indicates the current version |
 
-**SCD Type 2 rationale:** enables point-in-time reporting — a revenue query can accurately reflect which customer segment was active at the time of the order.
+**Historical strategy:** SCD Type 2.
 
----
+When a tracked customer attribute changes, a new dimension record is created instead of overwriting the previous version.
 
-### `dim_products` — SCD Type 2
+### 3.2 `dim_products`
 
-Captures product attribute history, most critically price changes. Using surrogate keys ensures that historical fact rows remain linked to the correct product version.
+Contains product descriptive attributes and historical versions.
 
-| Column | Type | Description |
+| Column | Data Type | Description |
 |---|---|---|
 | `product_key` | BIGINT | Surrogate primary key |
-| `product_id` | VARCHAR | Natural key from source system |
-| `product_name` | VARCHAR | Display name |
-| `category` | VARCHAR | Top-level product category |
+| `product_id` | VARCHAR | Natural/source product identifier |
+| `product_name` | VARCHAR | Product name |
+| `category` | VARCHAR | Product category |
 | `subcategory` | VARCHAR | Product subcategory |
-| `list_price` | DECIMAL | Catalogue price at the time this record was valid |
-| `valid_from` | DATE | Start of validity |
-| `valid_to` | DATE | End of validity (`NULL` if current) |
-| `is_current` | BOOLEAN | `TRUE` for the active record |
+| `list_price` | DECIMAL | Product list price |
+| `valid_from` | TIMESTAMP | Start of the record's validity |
+| `valid_to` | TIMESTAMP | End of the record's validity |
+| `is_current` | BOOLEAN | Indicates the current version |
 
----
+**Historical strategy:** SCD Type 2.
 
-### `dim_date`
+Product attribute changes generate new dimension versions, preserving previous values for historical analysis.
 
-A static date dimension pre-populated to cover the full analytical range of the business. Eliminates the need for date functions in analytical queries and enables consistent fiscal/calendar groupings.
+### 3.3 `dim_date`
 
-| Column | Type | Description |
+Provides calendar attributes for time-based analysis.
+
+| Column | Data Type | Description |
 |---|---|---|
-| `date_key` | INT | Surrogate key in `YYYYMMDD` format |
+| `date_key` | INTEGER | Date identifier in YYYYMMDD format |
 | `date_value` | DATE | Calendar date |
-| `year` | INT | Calendar year |
-| `quarter` | INT | Calendar quarter (1–4) |
-| `month` | INT | Month number (1–12) |
-| `day_of_week` | INT | Day of week (1 = Monday) |
-| `month_name` | VARCHAR | Full month name |
-| `is_weekend` | BOOLEAN | `TRUE` for Saturday and Sunday |
+| `year` | INTEGER | Calendar year |
+| `quarter` | INTEGER | Calendar quarter |
+| `month` | INTEGER | Month number |
+| `day_of_week` | INTEGER | Day of the week |
+| `month_name` | VARCHAR | Month name |
+| `is_weekend` | BOOLEAN | Indicates whether the date is a weekend |
 
----
+### 3.4 `dim_payment_methods`
 
-### `dim_payment_methods`
+Contains payment method reference data.
 
-A small, slowly changing reference table for payment types. Updated manually when new payment methods are introduced.
-
-| Column | Type | Description |
+| Column | Data Type | Description |
 |---|---|---|
-| `payment_method_key` | INT | Surrogate primary key |
-| `payment_method_name` | VARCHAR | Display name (e.g., Credit Card, PayPal) |
-| `payment_type` | VARCHAR | Broader category (e.g., Card, Digital Wallet, Bank Transfer) |
+| `payment_method_key` | INTEGER | Surrogate primary key |
+| `payment_method` | VARCHAR | Payment method description |
 
----
+### 3.5 `dim_shipment_status`
 
-### `dim_shipment_status`
+Contains shipment status reference data.
 
-A static lookup table mapping raw shipment status codes to business-friendly labels and categories.
-
-| Column | Type | Description |
+| Column | Data Type | Description |
 |---|---|---|
-| `shipment_status_key` | INT | Surrogate primary key |
-| `status_name` | VARCHAR | Descriptive status (e.g., Delivered, In Transit) |
-| `status_category` | VARCHAR | Aggregated category (e.g., Active, Completed, Exception) |
+| `shipment_status_key` | INTEGER | Surrogate primary key |
+| `shipment_status` | VARCHAR | Shipment status description |
 
----
+## 4. Entity Relationships
 
-## Design Principles
+The fact table references all five dimensions through foreign keys.
 
-- **Surrogate keys** are used on all tables to decouple the warehouse from source system key changes.
-- **Natural keys** (`customer_id`, `product_id`) are preserved as non-key attributes for traceability and source reconciliation.
-- **SCD Type 2** on customers and products enables accurate point-in-time analysis without storing snapshots of the fact table.
-- **Conformed dimensions** (`dim_date`, `dim_customers`) are reusable across future fact tables, supporting a scalable multi-subject-area warehouse.
-- **No many-to-many bridge tables** at this stage — the current grain eliminates the need for them and keeps query patterns simple.
+```mermaid
+erDiagram
+    dim_customers ||--o{ fact_order_items : customer_key
+    dim_products ||--o{ fact_order_items : product_key
+    dim_date ||--o{ fact_order_items : order_date_key
+    dim_payment_methods ||--o{ fact_order_items : payment_method_key
+    dim_shipment_status ||--o{ fact_order_items : shipment_status_key
+```
 
----
+Each dimension record can be associated with multiple order-item records.
 
-## dbt Model Layers
+## 5. Slowly Changing Dimensions — Type 2
 
-| Layer | Models | Purpose |
+SCD Type 2 preserves historical changes in customer and product attributes.
+
+When a tracked attribute changes:
+
+1. The existing dimension record is marked as no longer current.
+2. Its `valid_to` timestamp is updated.
+3. A new record is inserted with a new surrogate key.
+4. The new record receives a `valid_from` timestamp.
+5. The new record is marked as current.
+
+Example:
+
+| customer_key | customer_id | country | valid_from | valid_to | is_current |
+|---:|---|---|---|---|---|
+| 101 | C001 | Argentina | 2025-01-01 | 2025-06-30 | FALSE |
+| 205 | C001 | United States | 2025-07-01 | 9999-12-31 | TRUE |
+
+This allows historical queries to use the customer attributes that were valid at the time of the order.
+
+## 6. dbt Model Organization
+
+The dbt project follows a layered transformation structure.
+
+| Layer | Example models | Responsibility |
 |---|---|---|
-| `staging` | `stg_orders`, `stg_customers`, `stg_products`, ... | Light transformations on Silver zone data: type casting, renaming, deduplication |
-| `intermediate` | `int_order_items_enriched`, `int_customers_scd` | Business logic, SCD Type 2 processing, key generation |
-| `marts` | `fact_order_items`, `dim_customers`, `dim_products`, ... | Final analytics-ready tables exposed to BI tools |
+| Staging | `stg_orders`, `stg_customers`, `stg_products` | Standardize and prepare source data |
+| Intermediate | `int_order_items_enriched`, `int_customers_scd` | Apply business logic and combine datasets |
+| Marts | `fact_order_items`, `dim_customers`, `dim_products`, `dim_date`, `dim_payment_methods`, `dim_shipment_status` | Publish analytical models |
 
-All mart models include dbt tests for `not_null`, `unique` (on primary keys), and `relationships` (referential integrity between fact and dimensions).
+The SCD Type 2 implementation must use a consistent strategy for tracking changes and resolving historical dimension versions.
+
+## 7. Data Quality Requirements
+
+The dimensional model should enforce the following quality rules through dbt tests:
+
+- Surrogate primary keys must be unique and not null.
+- Required business identifiers must not be null.
+- Fact foreign keys must reference valid dimension records.
+- Quantity and monetary measures must satisfy their business constraints.
+- Each customer natural key must have no more than one current version.
+- Each product natural key must have no more than one current version.
+- Historical validity intervals must be consistent.
+- `total_amount` must reconcile with its business calculation.
+
+## 8. Design Principles
+
+The model follows these principles:
+
+**Surrogate keys:** Dimension tables use warehouse-generated keys to identify individual dimension versions.
+
+**Natural keys:** Source identifiers are retained to identify business entities across source systems.
+
+**Conformed dimensions:** Shared dimensions provide consistent descriptive context for analytical queries.
+
+**Historical preservation:** SCD Type 2 retains customer and product attribute history.
+
+**Defined fact grain:** `fact_order_items` represents one individual order item per row.
+
+## 9. Related Documentation
+
+- [Architecture](architecture.md)
+- [Architecture Diagram](architecture-diagram.md)
+- [Architectural Decisions](decisions.md)
+- [Implementation Guide](implementation-guide.md)
+
