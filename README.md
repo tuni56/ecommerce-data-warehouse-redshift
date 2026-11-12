@@ -1,278 +1,399 @@
 # Ecommerce Data Warehouse on Amazon Redshift Serverless
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Terraform](https://img.shields.io/badge/IaC-Terraform-623CE4?logo=terraform)](infra/terraform)
-[![dbt](https://img.shields.io/badge/Transform-dbt-FF694B?logo=dbt)](analytics/dbt)
+**An AWS data warehouse project demonstrating modern data engineering practices, dimensional modeling, and Infrastructure as Code.**
 
-A production-grade data warehouse implementation for ecommerce analytics, built on AWS using modern data engineering practices. This project demonstrates end-to-end data pipeline design, from raw ingestion to analytics-ready dimensional models.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![AWS](https://img.shields.io/badge/Cloud-AWS-orange)
+![Terraform](https://img.shields.io/badge/IaC-Terraform-7B42BC)
+![dbt](https://img.shields.io/badge/Transformations-dbt-FF694B)
+![Amazon Redshift](https://img.shields.io/badge/Warehouse-Redshift-4053D6)
 
-## Business Value
+## Overview
 
-**For C-Level:**
-- Single source of truth for ecommerce metrics (revenue, customer lifetime value, product performance)
-- Serverless architecture reduces operational overhead and scales automatically with demand
-- Cost-optimized design with pay-per-query pricing model
-- Historical tracking enables trend analysis and forecasting
+Ecommerce businesses generate data across orders, customers, products, payments, and shipments. When these sources are analyzed independently, answering basic business questions becomes difficult: How much revenue was actually generated? Which products are driving growth? How has customer behavior changed over time?
 
-**For Technical Teams:**
-- Medallion architecture (Bronze → Silver → Gold) ensures data quality and lineage
-- Infrastructure as Code enables reproducible deployments across environments
-- Incremental processing minimizes compute costs and latency
-- Star schema design optimized for BI tool performance
+This project explores how to address those challenges by designing an AWS-based analytical platform centered on **Amazon Redshift Serverless**.
+
+The architecture follows a layered data processing approach, separating raw data storage, transformation, and analytical consumption. Terraform defines the infrastructure, AWS services support ingestion and processing, and dbt manages SQL-based transformations and data quality.
+
+The objective is not simply to move data into a warehouse. It is to create a reproducible foundation for trustworthy business reporting.
+
+> **Project scope:** This is a portfolio engineering project. Architecture descriptions and implementation status should be read in the context of the repository's actual code and deployment artifacts. It is not presented as a production deployment for a commercial organization.
+
+## Business Context
+
+The platform is designed around two groups of requirements.
+
+**Business stakeholders need:**
+- A consistent source of truth for revenue, customer lifetime value, and product performance.
+- Historical visibility into customer and product changes.
+- Reliable metrics for financial and operational reporting.
+- An analytical foundation that can evolve as the business grows.
+
+**Engineering teams need:**
+- Reproducible infrastructure across environments.
+- Clear separation between ingestion, storage, and transformation.
+- Incremental processing to avoid unnecessary recomputation.
+- Testable data models with documented business logic.
+- Visibility into infrastructure consumption and pipeline execution.
 
 ## Architecture
 
-The solution implements a modern lakehouse pattern with three distinct layers:
+The solution follows a layered data architecture:
+
+**Bronze → Silver → Gold**
+
+| Layer | Responsibility | AWS / Data Technology |
+|---|---|---|
+| Bronze | Preserve source data and support reprocessing | Amazon S3 |
+| Silver | Clean, standardize, and prepare datasets | AWS Glue / SQL |
+| Gold | Publish analytics-ready dimensional models | Amazon Redshift Serverless / dbt |
+
+### Architecture at a glance
 
 ```mermaid
-graph LR
-    A[Source Systems<br/>OLTP Databases] -->|CDC/Batch Export| B[S3 Raw Zone<br/>Bronze Layer]
-    B -->|AWS Glue ETL| C[S3 Staging Zone<br/>Silver Layer]
-    C -->|COPY/Incremental Load| D[Redshift Serverless<br/>Gold Layer]
-    D -->|SQL Queries| E[BI Tools<br/>QuickSight/Tableau]
-    D -->|Ad-hoc Analysis| F[Data Analysts]
-    
-    style B fill:#ff9900,stroke:#232f3e,stroke-width:2px,color:#fff
-    style C fill:#ff9900,stroke:#232f3e,stroke-width:2px,color:#fff
-    style D fill:#8c4fff,stroke:#232f3e,stroke-width:2px,color:#fff
-    style E fill:#232f3e,stroke:#ff9900,stroke-width:2px,color:#fff
+flowchart LR
+    A["Ecommerce Source Data"] --> B["Amazon S3<br/>Bronze: Raw Data"]
+    B --> C["AWS Glue<br/>Processing"]
+    C --> D["Amazon S3<br/>Silver: Standardized Data"]
+    D --> E["Amazon Redshift Serverless"]
+    E --> F["dbt Transformations"]
+    F --> G["Gold: Star Schema"]
+    G --> H["BI & Analytics"]
+
+    I["Terraform"] -.-> B
+    I -.-> C
+    I -.-> E
+    J["Amazon CloudWatch"] -.-> C
+    J -.-> E
 ```
 
-**Key Components:**
-- **Amazon S3**: Immutable raw data storage and staging layer
-- **AWS Glue**: Serverless ETL for data cleaning and standardization
-- **Amazon Redshift Serverless**: Analytics engine with star schema dimensional model
-- **dbt**: SQL-based transformations with built-in testing and documentation
-- **Terraform**: Infrastructure provisioning with modular, reusable components
+The architecture separates storage and processing responsibilities so that raw data can be retained independently from analytical transformations.
 
-[Detailed architecture diagrams →](docs/architecture-diagram.md) | [Architecture documentation →](docs/architecture.md)
+**Key components**
 
-## Data Model
+- **Amazon S3:** Object storage for raw and intermediate datasets.
+- **AWS Glue:** Data cataloging and serverless data processing.
+- **Amazon Redshift Serverless:** Analytical warehouse for structured reporting workloads.
+- **dbt Core:** SQL transformations, model dependencies, testing, and documentation.
+- **Terraform:** Infrastructure provisioning and reusable configuration.
+- **AWS Step Functions:** Workflow coordination.
+- **Amazon CloudWatch:** Operational metrics, logs, and monitoring.
 
-Star schema optimized for analytical queries:
+For detailed architecture and implementation information, see the documentation in [`docs/`](docs/).
 
-**Fact Table:**
-- `fact_order_items` - Grain: one row per order item
+## Data Modeling
 
-**Dimensions:**
-- `dim_customers` - SCD Type 2 for historical tracking
-- `dim_products` - SCD Type 2 for price/attribute changes
-- `dim_date` - Standard date dimension for time-series analysis
-- `dim_payment_methods`
-- `dim_shipment_status`
+The analytical layer uses a **star schema** designed around ecommerce reporting requirements.
 
-This design prevents double-counting, enables flexible slicing/dicing, and maintains historical accuracy for point-in-time reporting.
+### Fact table
 
-[Data model details →](docs/data_model.md)
+| Model | Grain | Purpose |
+|---|---|---|
+| `fact_order_items` | One row per order item | Analyze sales, quantities, and order-item performance |
+
+### Dimension tables
+
+| Model | Strategy | Purpose |
+|---|---|---|
+| `dim_customers` | SCD Type 2 | Preserve customer attribute history |
+| `dim_products` | SCD Type 2 | Track product attribute and price changes |
+| `dim_date` | Standard date dimension | Support time-series analysis |
+| `dim_payment_methods` | Dimension | Analyze payment method distribution |
+| `dim_shipment_status` | Dimension | Analyze fulfillment and shipment status |
+
+SCD Type 2 preserves historical versions of selected dimension records, enabling point-in-time analysis rather than overwriting previous values.
+
+The fact table's grain is explicitly defined to prevent accidental duplication when dimensions or other datasets are joined. Financial metrics must also be defined consistently with the business event they represent.
+
+See the data modeling documentation in [`docs/`](docs/).
 
 ## Technology Stack
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| Storage | Amazon S3 | Raw and staging data lake |
-| ETL | AWS Glue | Serverless data processing |
-| Warehouse | Redshift Serverless | Analytics engine |
-| Transformation | dbt Core | SQL-based modeling & testing |
-| IaC | Terraform | Infrastructure provisioning |
+| Layer | Technology | Responsibility |
+|---|---|---|
+| Cloud | AWS | Managed infrastructure and services |
+| Storage | Amazon S3 | Raw and intermediate data storage |
+| Processing | AWS Glue | Data preparation and cataloging |
+| Warehouse | Amazon Redshift Serverless | Analytical query engine |
+| Transformation | dbt Core | SQL modeling and data quality |
+| Infrastructure as Code | Terraform | Reproducible infrastructure |
 | Orchestration | AWS Step Functions | Workflow coordination |
-| Monitoring | CloudWatch | Logging and alerting |
+| Observability | Amazon CloudWatch | Logs, metrics, and alerts |
 
-## Project Structure
+## Repository Structure
 
-```
+```text
 .
 ├── analytics/
-│   ├── dbt/              # dbt models, tests, and documentation
-│   └── sql_examples/     # Sample analytical queries
+│   ├── dbt/
+│   │   ├── models/
+│   │   ├── tests/
+│   │   └── ...
+│   └── sql_examples/
+│
 ├── infra/
-│   ├── terraform/        # Infrastructure as Code
-│   │   ├── modules/      # Reusable Terraform modules
-│   │   └── environments/ # Environment-specific configs (dev/prod)
-│   └── diagrams/         # Architecture diagrams
-└── docs/                 # Technical documentation
+│   ├── terraform/
+│   │   ├── modules/
+│   │   └── environments/
+│   │       ├── dev/
+│   │       └── prod/
+│   └── diagrams/
+│
+├── docs/
+│   └── ...
+│
+├── LICENSE
+└── README.md
 ```
 
-## Quick Start
+The repository separates analytical logic from infrastructure definitions. Terraform modules provide reusable building blocks, while environment-specific configuration keeps deployment settings isolated.
+
+## Getting Started
 
 ### Prerequisites
 
-- AWS Account with appropriate IAM permissions
-- Terraform >= 1.5.0
-- AWS CLI configured with credentials
-- dbt Core >= 1.6.0
-- Python >= 3.9
+- An AWS account with permissions to provision the required services.
+- AWS CLI configured with credentials.
+- Terraform >= 1.5.0.
+- Python >= 3.9.
+- dbt Core and the appropriate Redshift adapter.
 
-### Deployment
+### 1. Clone the repository
 
-**1. Clone the repository**
 ```bash
-git clone https://github.com/<your-username>/ecommerce-data-warehouse-redshift.git
+git clone https://github.com/tuni56/ecommerce-data-warehouse-redshift.git
 cd ecommerce-data-warehouse-redshift
 ```
 
-**2. Initialize Terraform**
+### 2. Initialize Terraform
+
 ```bash
 cd infra/terraform/environments/dev
 terraform init
 ```
 
-**3. Review and apply infrastructure**
+### 3. Review the infrastructure plan
+
 ```bash
+terraform validate
 terraform plan
+```
+
+Review the plan, AWS region, resource names, IAM permissions, and expected costs before applying changes.
+
+### 4. Provision the infrastructure
+
+```bash
 terraform apply
 ```
 
-This provisions:
-- S3 buckets (raw, staging, logs)
-- Redshift Serverless namespace and workgroup
-- Glue jobs and crawlers
-- IAM roles and policies
-- VPC and security groups
+The resources created depend on the Terraform configuration in the selected environment. Review the actual module definitions before assuming which AWS resources will be provisioned.
 
-**4. Configure dbt**
+### 5. Configure dbt
+
 ```bash
-cd analytics/dbt
+cd ../../../../analytics/dbt
 cp profiles.yml.example profiles.yml
-# Edit profiles.yml with your Redshift endpoint
 ```
 
-**5. Run dbt transformations**
+Configure the connection profile with the appropriate Redshift endpoint, database, schema, and authentication settings.
+
+Do not commit credentials or secrets to the repository.
+
+### 6. Install dependencies and execute models
+
 ```bash
 dbt deps
+dbt debug
 dbt run --target dev
 dbt test
 ```
 
-**6. Verify deployment**
-```bash
-# Query Redshift to confirm data loaded
-aws redshift-data execute-statement \
-  --workgroup-name ecommerce-dwh-dev \
-  --database dev \
-  --sql "SELECT COUNT(*) FROM fact_order_items;"
+### 7. Validate the analytical data
+
+For example, once the corresponding model and database objects are available:
+
+```sql
+SELECT COUNT(*)
+FROM fact_order_items;
 ```
 
-## Key Features
+## Engineering Practices
 
 ### Infrastructure as Code
-- Modular Terraform design for reusability across environments
-- Separate state management per environment (dev/staging/prod)
-- Automated resource tagging for cost allocation
+
+Terraform is used to define cloud infrastructure declaratively.
+
+The design supports:
+- Reusable infrastructure modules.
+- Environment-specific configuration.
+- Consistent resource naming and tagging.
+- Reviewable infrastructure changes through version control.
 
 ### Data Quality
-- dbt tests for uniqueness, referential integrity, and not-null constraints
-- Row count reconciliation between layers
-- Freshness checks for SLA monitoring
 
-### Performance Optimization
-- Distribution keys on fact tables for co-located joins
-- Sort keys on date columns for time-series queries
-- Incremental models to minimize full table scans
-- Workload management (WLM) configuration for query prioritization
+Data quality is treated as part of the transformation process, not as a final reporting step.
+
+Relevant validation patterns include:
+- Primary-key uniqueness.
+- Not-null constraints.
+- Referential integrity.
+- Source-to-target reconciliation.
+- Data freshness checks.
+
+dbt tests provide a framework for expressing and validating these expectations.
+
+### Incremental Processing
+
+Incremental models reduce the need to rebuild entire datasets when only a subset of records has changed.
+
+The incremental strategy must account for late-arriving records, updates, historical corrections, and the selected model's unique key.
+
+### Dimensional Modeling
+
+The star schema separates measurable business events from descriptive attributes.
+
+Defining the grain of each fact table is essential to prevent double-counting and to maintain consistent business metrics.
 
 ### Cost Management
-- Redshift Serverless auto-scales based on workload
-- S3 lifecycle policies for archival to Glacier
-- Glue job bookmarks prevent reprocessing
-- Development environment with reduced capacity
+
+Serverless infrastructure reduces some operational responsibilities, but it does not automatically guarantee lower costs.
+
+The cost model should account for:
+- Redshift Serverless compute consumption (RPU-hours).
+- Redshift storage.
+- S3 storage, requests, and data transfer.
+- Glue job execution and catalog usage.
+- Step Functions state transitions.
+- CloudWatch logs, metrics, and retention.
+- Networking and supporting AWS services.
+
+Cost optimization should be based on measured workload behavior, not assumptions about the word *serverless*.
 
 ## Sample Analytics Queries
 
-**Monthly Revenue Trend:**
+### Monthly Revenue Trend
+
 ```sql
-SELECT 
+SELECT
     d.year_month,
-    SUM(f.total_amount) as revenue
-FROM fact_order_items f
-JOIN dim_date d ON f.order_date_key = d.date_key
-GROUP BY 1
-ORDER BY 1;
+    SUM(f.total_amount) AS revenue
+FROM fact_order_items AS f
+JOIN dim_date AS d
+    ON f.order_date_key = d.date_key
+GROUP BY d.year_month
+ORDER BY d.year_month;
 ```
 
-**Top Products by Revenue:**
+### Top Products by Revenue
+
 ```sql
-SELECT 
+SELECT
     p.product_name,
-    SUM(f.quantity) as units_sold,
-    SUM(f.total_amount) as revenue
-FROM fact_order_items f
-JOIN dim_products p ON f.product_key = p.product_key
+    SUM(f.quantity) AS units_sold,
+    SUM(f.total_amount) AS revenue
+FROM fact_order_items AS f
+JOIN dim_products AS p
+    ON f.product_key = p.product_key
 WHERE p.is_current = TRUE
-GROUP BY 1
-ORDER BY 3 DESC
+GROUP BY p.product_name
+ORDER BY revenue DESC
 LIMIT 10;
 ```
 
-[More examples →](analytics/sql_examples/)
+These examples assume the referenced columns and models exist in the deployed schema. Revenue definitions should be aligned with the business rules used by the source system.
 
-## Design Decisions
+## Architecture Decisions
 
-Key architectural choices and tradeoffs:
+This project involves trade-offs between operational complexity, analytical flexibility, performance, and cost.
 
-- **Redshift Serverless vs Provisioned**: Chose serverless for automatic scaling and simplified operations. Suitable for variable workloads with unpredictable query patterns.
-- **Star Schema vs Data Vault**: Star schema prioritizes query simplicity and BI tool compatibility over extreme flexibility.
-- **SCD Type 2 for dimensions**: Enables point-in-time analysis at the cost of increased storage and join complexity.
-- **Glue vs EMR**: Glue's serverless model reduces operational burden for moderate data volumes (<10TB).
-- **S3 as staging layer**: Decouples ingestion from transformation, enables reprocessing, and reduces Redshift storage costs.
+The main design decisions include:
 
-[Full decision log →](docs/decisions.md)
+| Decision | Rationale |
+|---|---|
+| Redshift Serverless over provisioned Redshift | Avoid initial cluster capacity management while workload patterns are still being evaluated |
+| Star schema over Data Vault | Prioritize straightforward analytical consumption and BI compatibility |
+| SCD Type 2 dimensions | Preserve historical changes for point-in-time analysis |
+| AWS Glue over self-managed processing infrastructure | Reduce infrastructure management for the expected processing workload |
+| S3 as a separate storage layer | Decouple raw data retention from warehouse transformations |
 
-## Monitoring & Observability
+These decisions are contextual, not universal recommendations. Different workload sizes, concurrency patterns, latency objectives, and cost constraints can lead to different choices.
 
-- **CloudWatch Dashboards**: Query performance, RPU consumption, data freshness
-- **Glue Job Metrics**: Success rate, duration, DPU utilization
-- **dbt Test Results**: Data quality KPIs tracked over time
-- **Cost Alerts**: Budget thresholds for Redshift and Glue
+See [`docs/`](docs/) for supporting architecture documentation and decision records.
+
+## Monitoring and Observability
+
+The architecture uses Amazon CloudWatch as the central monitoring service.
+
+Relevant monitoring areas include:
+
+- **Redshift:** Query performance, compute consumption, and workload behavior.
+- **AWS Glue:** Job execution status, duration, and processing metrics.
+- **Step Functions:** Workflow execution status and failures.
+- **Data quality:** dbt test results and data freshness.
+- **Cost:** AWS Budgets and service-level cost monitoring.
+
+Operational metrics should be tied to explicit expectations, such as pipeline completion time and data freshness.
 
 ## Development Workflow
 
-This project follows GitFlow branching strategy:
+The repository follows a GitFlow-inspired branching strategy:
 
-- `main` - Production-ready code
-- `develop` - Integration branch for features
-- `feature/*` - Individual feature branches
-- `hotfix/*` - Emergency production fixes
+| Branch | Purpose |
+|---|---|
+| `main` | Stable, reviewed code |
+| `develop` | Integration branch |
+| `feature/*` | Individual feature development |
+| `hotfix/*` | Urgent corrections |
 
-**Contributing:**
-1. Create feature branch from `develop`
-2. Implement changes with tests
-3. Submit PR with description of changes
-4. Merge to `develop` after review
-5. Release to `main` when ready for production
+### Contribution process
+
+1. Create a feature branch from `develop`.
+2. Implement the change.
+3. Validate Terraform and run relevant dbt tests.
+4. Submit a pull request with context and validation results.
+5. Merge into `develop` after review.
+6. Promote reviewed releases to `main`.
 
 ## Roadmap
 
-- [ ] CI/CD pipeline with GitHub Actions
-- [ ] Incremental dbt models for large fact tables
-- [ ] Real-time ingestion with Kinesis Data Firehose
-- [ ] ML integration for customer churn prediction
-- [ ] Cross-region disaster recovery
+Planned improvements:
+
+- [ ] Terraform and dbt CI/CD with GitHub Actions.
+- [ ] Expanded incremental dbt models and late-arriving data handling.
+- [ ] Automated data quality and freshness reporting.
+- [ ] Real-time ingestion evaluation.
+- [ ] ML use cases, such as customer churn prediction.
+- [ ] Cross-region disaster recovery strategy.
+
+Roadmap items are future work, not claims about existing functionality.
 
 ## Cost Estimation
 
-**Development Environment** (monthly):
-- Redshift Serverless: ~$50-100 (8 RPU-hours/day)
-- S3 Storage: ~$5 (100GB)
-- Glue Jobs: ~$20 (daily runs)
-- **Total: ~$75-125/month**
+Actual costs depend on AWS region, compute configuration, storage volume, query patterns, execution frequency, and data transfer.
 
-**Production Environment** (monthly, estimated):
-- Redshift Serverless: ~$500-1000 (depends on query load)
-- S3 Storage: ~$50 (1TB)
-- Glue Jobs: ~$100 (hourly incremental loads)
-- **Total: ~$650-1150/month**
+A meaningful estimate should be built from the deployed configuration using the [AWS Pricing Calculator](https://calculator.aws/).
 
-Use [AWS Pricing Calculator](https://calculator.aws) for detailed estimates based on your workload.
+Avoid treating illustrative figures as a guaranteed monthly bill. In particular, Redshift Serverless compute consumption can dominate costs when the workgroup is active for extended periods.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See [`LICENSE`](LICENSE) for details.
 
 ## Author
 
-**Rocio** - AWS Data Engineer  
+**Rocio Baigorria**
+
+Data Engineering | AWS | Cloud Data Platforms
+
+- [GitHub](https://github.com/tuni56)
+- [LinkedIn](https://www.linkedin.com/in/rociobaigorria)
+
+---
+
+This repository is an independent portfolio project and is not affiliated with or endorsed by Amazon Web Services or any commercial organization.
 [GitHub](https://github.com/<your-username>) | [LinkedIn](https://linkedin.com/in/<your-profile>)
 
 ---
 
-*This project is a portfolio demonstration and not affiliated with any commercial entity.*
